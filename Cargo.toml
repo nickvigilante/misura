@@ -2,6 +2,13 @@
 name = "misura"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "Where an HTTP request spends its time: DNS, TCP, TLS, waiting and transfer."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nickvigilante/misura"
+readme = "README.md"
+keywords = ["http", "latency", "timing", "cli"]
+categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 http-body-util = "0.1.5"
