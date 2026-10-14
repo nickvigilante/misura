@@ -1,0 +1,20 @@
+[package]
+name = "misura"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["client", "http1", "http2"] }
+hyper-util = { version = "0.1.21", features = ["tokio", "client"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7.1"
+tokio = { version = "1.53.3", default-features = false, features = ["rt", "net", "time", "macros", "io-util"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
+
+[dev-dependencies]
+futures-core = "0.3.34"
+hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1.21", features = ["server", "server-auto", "tokio"] }
+rcgen = "0.14.10"
+tokio = { version = "1.53.3", features = ["sync", "rt", "macros", "net", "time"] }
