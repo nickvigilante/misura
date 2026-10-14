@@ -13,8 +13,10 @@ macro_rules! redacted {
     ($value:expr) => {
         insta::with_settings!({filters => vec![
             (r"(localhost|127\.0\.0\.1):\d+", "$1:[port]"),
-            // On macOS, localhost resolves to ::1 first, where nothing listens.
+            // Where IPv6 works, localhost resolves to ::1 first, and nothing
+            // listens there, so misura falls back to 127.0.0.1.
             (r" \(after trying \d+ addresses\)", ""),
+            (r#""connect_attempts": [1-9]\d*"#, r#""connect_attempts": [n]"#),
             // JSON durations.
             (r#"": \d+\.\d+"#, r#"": [ms]"#),
             // A waterfall row: the duration and the bar after it.

@@ -16,7 +16,7 @@ expression: "run(&[\"--json\", \"-L\", &server().https_url(\"/redirect?to=/\")])
             {
               "url": "https://localhost:[port]/redirect?to=/",
               "peer": "127.0.0.1:[port]",
-              "connect_attempts": 1,
+              "connect_attempts": [n],
               "reused_connection": false,
               "protocol": "h2",
               "tls_version": "TLSv1.3",
