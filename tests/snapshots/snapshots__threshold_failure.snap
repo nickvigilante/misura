@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: "run(&[\"--max-ttfb\", \"1ms\", &server().http_url(\"/?headers_ms=20\")])"
+---
+GET http://localhost:[port]/?headers_ms=20 → 127.0.0.1:[port]
+HTTP/1.1 · 200 OK · 16 B
+
+  DNS lookup [ms]
+  TCP connect [ms]
+  Server wait [ms]
+  Transfer [ms]
+  Total [ms]
+  TTFB [ms]
+
+✗ TTFB went over --max-ttfb 1 ms, reaching [ms].

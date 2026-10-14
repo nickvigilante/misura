@@ -1,145 +1,199 @@
-//! Spike: time each phase of one HTTPS request, to check the approach
-//! against curl before building the real CLI.
-//!
-//! Usage: misura URL [--cacert PATH] [--http1 | --http2]
+//! misura: where an HTTP request spends its time.
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+mod cli;
+mod connect;
+mod measure;
+mod report;
+mod resolve;
+mod stats;
+mod target;
+mod tls;
 
-use http_body_util::{BodyExt, Empty};
-use hyper::body::Bytes;
-use hyper::{Request, Uri};
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
-use tokio::net::TcpStream;
+use std::io::Write;
+use std::process::ExitCode;
+use std::time::Duration;
 
-#[derive(Debug, Default)]
-struct Timings {
-    dns: Duration,
-    tcp: Duration,
-    tls: Duration,
-    /// From the request being handed to hyper to its response headers.
-    wait: Duration,
-    /// From the response headers to the end of the body.
-    transfer: Duration,
-}
+use clap::Parser;
+use hyper::Method;
+use hyper::header::HeaderMap;
 
-fn ms(d: Duration) -> f64 {
-    d.as_secs_f64() * 1000.0
-}
+use crate::measure::{Conn, Follow, Plan, Run, round_ms};
+use crate::report::{Report, Series};
+use crate::resolve::Override;
+use crate::target::{Scheme, Target};
+use crate::tls::Offer;
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = std::env::args().skip(1);
-    let uri: Uri = args.next().ok_or("usage: misura URL")?.parse()?;
-    let mut cacert = None;
-    let mut alpn: Vec<Vec<u8>> = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--cacert" => cacert = Some(args.next().ok_or("--cacert needs a path")?),
-            "--http1" => alpn = vec![b"http/1.1".to_vec()],
-            "--http2" => alpn = vec![b"h2".to_vec()],
-            other => return Err(format!("unknown argument {other}").into()),
+fn main() -> ExitCode {
+    let args = cli::Args::parse();
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("starting the runtime: {e}"))
+        .and_then(|rt| rt.block_on(run(&args)));
+    let mut out = anstream::stdout().lock();
+    match result {
+        Ok(report) => {
+            let printed = if args.json {
+                report::json(&report, &mut out)
+            } else {
+                report::human(&report, &mut out)
+            };
+            // A closed pipe (`misura … | head`) isn't worth an error.
+            if let Err(e) = printed.and_then(|()| out.flush())
+                && e.kind() != std::io::ErrorKind::BrokenPipe
+            {
+                eprintln!("misura: error: writing output: {e}");
+                return ExitCode::from(2);
+            }
+            if report.failed {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(e) => {
+            if args.json {
+                let _ = report::json_error(&e, &mut out);
+            }
+            let _ = out.flush();
+            eprintln!("misura: error: {e}");
+            ExitCode::from(2)
         }
     }
-    let host = uri.host().ok_or("URL needs a host")?.to_owned();
-    let https = uri.scheme_str() == Some("https");
-    let port = uri.port_u16().unwrap_or(if https { 443 } else { 80 });
+}
 
-    let mut t = Timings::default();
-    let start = Instant::now();
-
-    // DNS: the system resolver, as other programs on this machine see it.
-    let addrs: Vec<_> = tokio::net::lookup_host((host.as_str(), port))
-        .await?
-        .collect();
-    let after_dns = Instant::now();
-    t.dns = after_dns - start;
-
-    // TCP: first address that connects.
-    let mut tcp = None;
-    for addr in &addrs {
-        if let Ok(s) = TcpStream::connect(addr).await {
-            tcp = Some((s, *addr));
-            break;
-        }
+async fn run(args: &cli::Args) -> Result<Report, String> {
+    let target = Target::parse(&args.url)?;
+    let method = Method::from_bytes(args.method.as_bytes())
+        .map_err(|_| format!("invalid method {:?}", args.method))?;
+    let mut headers = HeaderMap::new();
+    for spec in &args.headers {
+        let (name, value) = measure::parse_header(spec)?;
+        headers.append(name, value);
     }
-    let (tcp, peer) = tcp.ok_or("could not connect to any address")?;
-    tcp.set_nodelay(true)?;
-    let after_tcp = Instant::now();
-    t.tcp = after_tcp - after_dns;
-
-    let req = Request::get(uri.path_and_query().map_or("/", |p| p.as_str()))
-        .header("host", &host)
-        .header("user-agent", "misura/0.1")
-        .body(Empty::<Bytes>::new())?;
-
-    let (status, protocol, body_len);
-    let after_conn;
-    if https {
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let extra: Vec<CertificateDer<'static>> = match &cacert {
-            Some(path) => CertificateDer::pem_file_iter(path)?.collect::<Result<_, _>>()?,
-            None => Vec::new(),
-        };
-        let verifier =
-            rustls_platform_verifier::Verifier::new_with_extra_roots(extra, provider.clone())?;
-        let mut config = rustls::ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(verifier))
-            .with_no_client_auth();
-        config.alpn_protocols = alpn;
-        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
-        let tls = connector
-            .connect(ServerName::try_from(host.clone())?, tcp)
-            .await?;
-        after_conn = Instant::now();
-        t.tls = after_conn - after_tcp;
-        let h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
-        let io = TokioIo::new(tls);
-        let resp = if h2 {
-            protocol = "h2";
-            let (mut send, conn) =
-                hyper::client::conn::http2::handshake(TokioExecutor::new(), io).await?;
-            tokio::spawn(conn);
-            let mut req = req;
-            *req.uri_mut() = uri.clone();
-            req.headers_mut().remove("host");
-            send.send_request(req).await?
-        } else {
-            protocol = "HTTP/1.1";
-            let (mut send, conn) = hyper::client::conn::http1::handshake(io).await?;
-            tokio::spawn(conn);
-            send.send_request(req).await?
-        };
-        let after_headers = Instant::now();
-        t.wait = after_headers - after_conn;
-        status = resp.status();
-        body_len = resp.into_body().collect().await?.to_bytes().len();
-        t.transfer = after_headers.elapsed();
+    let overrides = args
+        .resolve
+        .iter()
+        .map(|s| Override::parse(s))
+        .collect::<Result<Vec<_>, _>>()?;
+    let offers: &[(&'static str, Offer)] = if args.compare {
+        &[("http1", Offer::Http1), ("http2", Offer::Http2)]
+    } else if args.http1 {
+        &[("http1", Offer::Http1)]
+    } else if args.http2 {
+        &[("http2", Offer::Http2)]
     } else {
-        after_conn = after_tcp;
-        protocol = "HTTP/1.1";
-        let (mut send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp)).await?;
-        tokio::spawn(conn);
-        let resp = send.send_request(req).await?;
-        let after_headers = Instant::now();
-        t.wait = after_headers - after_conn;
-        status = resp.status();
-        body_len = resp.into_body().collect().await?.to_bytes().len();
-        t.transfer = after_headers.elapsed();
+        &[("auto", Offer::Both)]
+    };
+    if (args.compare || args.http2) && target.scheme == Scheme::Http {
+        let flag = if args.compare { "--compare" } else { "--http2" };
+        return Err(format!(
+            "{flag} needs an https:// URL; misura doesn't do HTTP/2 without TLS"
+        ));
+    }
+    let follow = Follow {
+        enabled: args.location,
+        cross_host: args.cross_host,
+        max: args.max_redirects,
+    };
+    let plans: Vec<Plan> = offers
+        .iter()
+        .map(|&(_, offer)| {
+            Plan::new(
+                method.clone(),
+                headers.clone(),
+                overrides.clone(),
+                args.cacert.clone(),
+                offer,
+            )
+        })
+        .collect();
+
+    let mut conns: Vec<Option<Conn>> = plans.iter().map(|_| None).collect();
+    let mut runs: Vec<Vec<Run>> = plans.iter().map(|_| Vec::new()).collect();
+    // With --compare, the protocols take turns, so a change in the network
+    // during the runs affects both alike.
+    for _ in 0..args.count {
+        for (i, plan) in plans.iter().enumerate() {
+            let conn = if args.reuse { conns[i].take() } else { None };
+            let (run, conn) =
+                tokio::time::timeout(args.timeout, measure::chain(plan, &target, follow, conn))
+                    .await
+                    .map_err(|_| {
+                        format!("{target} took longer than --timeout {}", show(args.timeout))
+                    })??;
+            if args.reuse {
+                conns[i] = conn;
+            }
+            runs[i].push(run);
+        }
     }
 
-    println!("{peer} {protocol} {status} {body_len} bytes");
-    println!(
-        "dns={:.2} tcp={:.2} tls={:.2} wait={:.2} transfer={:.2} total={:.2}",
-        ms(t.dns),
-        ms(t.tcp),
-        ms(t.tls),
-        ms(t.wait),
-        ms(t.transfer),
-        ms(start.elapsed())
-    );
-    Ok(())
+    let results: Vec<Series> = offers
+        .iter()
+        .zip(runs)
+        .map(|(&(name, _), runs)| Series::new(name, runs))
+        .collect();
+    let reasons = failures(args, &results);
+    Ok(Report::new(
+        method.to_string(),
+        target.to_string(),
+        args.reuse,
+        results,
+        reasons,
+    ))
+}
+
+/// Milliseconds to two decimal places, without trailing zeros.
+fn show(d: Duration) -> String {
+    let s = format!("{:.2}", round_ms(d));
+    format!("{} ms", s.trim_end_matches('0').trim_end_matches('.'))
+}
+
+/// Why misura should exit with 1, if it should.
+fn failures(args: &cli::Args, results: &[Series]) -> Vec<String> {
+    let runs: Vec<&Run> = results.iter().flat_map(|s| &s.runs).collect();
+    let of = |n: usize| {
+        if runs.len() == 1 {
+            String::new()
+        } else {
+            format!(" in {n} of {} requests", runs.len())
+        }
+    };
+    let mut reasons = Vec::new();
+    let errors: Vec<u16> = runs
+        .iter()
+        .map(|r| r.last().status)
+        .filter(|s| *s >= 400)
+        .collect();
+    if let Some(&status) = errors.first() {
+        reasons.push(format!("The server answered {status}{}", of(errors.len())));
+    }
+    let ttfb = runs.iter().map(|r| r.phases.ttfb);
+    let total = runs.iter().map(|r| r.phases.total);
+    if let Some(reason) = over("TTFB", "--max-ttfb", args.max_ttfb, ttfb, &of) {
+        reasons.push(reason);
+    }
+    if let Some(reason) = over("Total time", "--max-total", args.max_total, total, &of) {
+        reasons.push(reason);
+    }
+    reasons
+}
+
+fn over(
+    what: &str,
+    flag: &str,
+    limit: Option<Duration>,
+    values: impl Iterator<Item = Duration>,
+    of: &dyn Fn(usize) -> String,
+) -> Option<String> {
+    let limit = limit?;
+    let over: Vec<Duration> = values.filter(|d| *d > limit).collect();
+    let worst = over.iter().max()?;
+    Some(format!(
+        "{what} went over {flag} {}{}, reaching {}",
+        show(limit),
+        of(over.len()),
+        show(*worst)
+    ))
 }

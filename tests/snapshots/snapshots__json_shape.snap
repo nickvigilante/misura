@@ -1,0 +1,124 @@
+---
+source: tests/snapshots.rs
+expression: "run(&[\"--json\", \"-L\", &server().https_url(\"/redirect?to=/\")])"
+---
+{
+  "version": 1,
+  "method": "GET",
+  "url": "https://localhost:[port]/redirect?to=/",
+  "reuse": false,
+  "results": [
+    {
+      "protocol": "auto",
+      "runs": [
+        {
+          "hops": [
+            {
+              "url": "https://localhost:[port]/redirect?to=/",
+              "peer": "127.0.0.1:[port]",
+              "connect_attempts": 1,
+              "reused_connection": false,
+              "protocol": "h2",
+              "tls_version": "TLSv1.3",
+              "tls_cipher": "TLS13_AES_256_GCM_SHA384",
+              "status": 302,
+              "body_bytes": 0,
+              "location": "/",
+              "ms": {
+                "dns": [ms],
+                "tcp": [ms],
+                "tls": [ms],
+                "wait": [ms],
+                "transfer": [ms],
+                "ttfb": [ms],
+                "total": [ms]
+              }
+            },
+            {
+              "url": "https://localhost:[port]/",
+              "peer": "127.0.0.1:[port]",
+              "connect_attempts": 0,
+              "reused_connection": true,
+              "protocol": "h2",
+              "tls_version": "TLSv1.3",
+              "tls_cipher": "TLS13_AES_256_GCM_SHA384",
+              "status": 200,
+              "body_bytes": 16,
+              "ms": {
+                "dns": null,
+                "tcp": null,
+                "tls": null,
+                "wait": [ms],
+                "transfer": [ms],
+                "ttfb": [ms],
+                "total": [ms]
+              }
+            }
+          ],
+          "ms": {
+            "dns": [ms],
+            "tcp": [ms],
+            "tls": [ms],
+            "wait": [ms],
+            "transfer": [ms],
+            "ttfb": [ms],
+            "total": [ms]
+          }
+        }
+      ],
+      "summary": {
+        "dns": {
+          "min": [ms],
+          "p50": [ms],
+          "p90": [ms],
+          "p99": [ms],
+          "max": [ms]
+        },
+        "tcp": {
+          "min": [ms],
+          "p50": [ms],
+          "p90": [ms],
+          "p99": [ms],
+          "max": [ms]
+        },
+        "tls": {
+          "min": [ms],
+          "p50": [ms],
+          "p90": [ms],
+          "p99": [ms],
+          "max": [ms]
+        },
+        "wait": {
+          "min": [ms],
+          "p50": [ms],
+          "p90": [ms],
+          "p99": [ms],
+          "max": [ms]
+        },
+        "transfer": {
+          "min": [ms],
+          "p50": [ms],
+          "p90": [ms],
+          "p99": [ms],
+          "max": [ms]
+        },
+        "ttfb": {
+          "min": [ms],
+          "p50": [ms],
+          "p90": [ms],
+          "p99": [ms],
+          "max": [ms]
+        },
+        "total": {
+          "min": [ms],
+          "p50": [ms],
+          "p90": [ms],
+          "p99": [ms],
+          "max": [ms]
+        }
+      }
+    }
+  ],
+  "failed": false,
+  "reasons": []
+}

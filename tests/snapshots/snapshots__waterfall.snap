@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: "run(&[&server().https_url(\"/?size=2048\")])"
+---
+GET https://localhost:[port]/?size=2048 → 127.0.0.1:[port]
+h2 · TLSv1.3 · TLS13_AES_256_GCM_SHA384 · 200 OK · 2.0 KiB
+
+  DNS lookup [ms]
+  TCP connect [ms]
+  TLS handshake [ms]
+  Server wait [ms]
+  Transfer [ms]
+  Total [ms]
+  TTFB [ms]
