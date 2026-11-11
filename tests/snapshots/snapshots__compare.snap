@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: "run(&[\"--compare\", &server().https_url(\"/\")])"
+---
+GET https://localhost:[port]/
+  HTTP/1.1 → 127.0.0.1:[port] · TLSv1.3 · 200 OK ×1
+  h2       → 127.0.0.1:[port] · TLSv1.3 · 200 OK ×1
+
+  ms                HTTP/1.1         h2
+  DNS lookup [ms...]
+  TCP connect [ms...]
+  TLS handshake [ms...]
+  Server wait [ms...]
+  Transfer [ms...]
+  TTFB [ms...]
+  Total [ms...]

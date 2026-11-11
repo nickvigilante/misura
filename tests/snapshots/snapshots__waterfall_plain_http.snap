@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: "run(&[&server().http_url(\"/\")])"
+---
+GET http://localhost:[port]/ → 127.0.0.1:[port]
+HTTP/1.1 · 200 OK · 16 B
+
+  DNS lookup [ms]
+  TCP connect [ms]
+  Server wait [ms]
+  Transfer [ms]
+  Total [ms]
+  TTFB [ms]

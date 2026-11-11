@@ -1,0 +1,29 @@
+---
+source: tests/snapshots.rs
+expression: "run(&[\"-L\", &server().https_url(\"/redirect?to=/\")])"
+---
+Hop 1 of 2
+GET https://localhost:[port]/redirect?to=/ → 127.0.0.1:[port]
+h2 · TLSv1.3 · TLS13_AES_256_GCM_SHA384 · 302 Found · 0 B · Location: /
+
+  DNS lookup [ms]
+  TCP connect [ms]
+  TLS handshake [ms]
+  Server wait [ms]
+  Transfer [ms]
+  Total [ms]
+  TTFB [ms]
+
+Hop 2 of 2
+GET https://localhost:[port]/ → 127.0.0.1:[port] (reused connection)
+h2 · TLSv1.3 · TLS13_AES_256_GCM_SHA384 · 200 OK · 16 B
+
+  DNS lookup           reused
+  TCP connect          reused
+  TLS handshake        reused
+  Server wait [ms]
+  Transfer [ms]
+  Total [ms]
+  TTFB [ms]
+
+2 hops: [ms] total, TTFB [ms]

@@ -1,0 +1,98 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --locked
+
+      # rust-version in Cargo.toml is a promise; check it still builds there.
+      - uses: dtolnay/rust-toolchain@1.88
+      - name: cargo check (MSRV 1.88)
+        run: cargo +1.88 check --all-targets --locked
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: sember --check
+        uses: nickvigilante/sember@v0.1.1
+        with:
+          changed: "false"
+          paths: README.md docs
+
+  # Reports misura's speed next to curl's. It doesn't gate merges, because
+  # shared runners are too noisy for a pass/fail threshold.
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install hyperfine
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq hyperfine
+      - name: misura vs curl
+        run: |
+          scripts/bench.sh bench.md
+          {
+            echo "## misura vs curl (local server)"
+            echo
+            cat bench.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The one check branch protection requires.
+  ci:
+    name: ci
+    if: always()
+    needs: [test, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the jobs it depends on
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            if [[ $result != success ]]; then
+              echo "::error::a required job finished with: $result"
+              exit 1
+            fi
+          done

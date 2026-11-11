@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: "run(&[\"-n\", \"3\", \"--reuse\", &server().https_url(\"/\")])"
+---
+GET https://localhost:[port]/ → 127.0.0.1:[port]
+h2 · TLSv1.3 · 200 OK ×3 · 3 requests, one connection
+
+  ms                   min      p50      p90      p99      max
+  DNS lookup [ms...]
+  TCP connect [ms...]
+  TLS handshake [ms...]
+  Server wait [ms...]
+  Transfer [ms...]
+  TTFB [ms...]
+  Total [ms...]
+
+  DNS, TCP and TLS are from requests that opened a connection.
